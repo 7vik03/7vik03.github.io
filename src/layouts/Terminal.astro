@@ -1,0 +1,81 @@
+---
+export interface Props {
+  title: string;
+  description?: string;
+  ogType?: string;
+  barTitle?: string;
+  toc?: { id: string; label: string; depth?: number }[];
+  tocLabel?: string;
+  stamp?: string;
+}
+const {
+  title,
+  description = 'Sathvik Rajampalli — 2nd-year MSEE student at Columbia University, focused on hw–sw co-design, firmware, and computer (micro)architecture.',
+  ogType = 'profile',
+  barTitle = '~/sathvik — zsh — 96×30',
+  toc = [],
+  tocLabel = 'ls ~/sections',
+  stamp = 'Last updated: Jul 2026',
+} = Astro.props;
+
+import '../styles/terminal.css';
+const canonical = new URL(Astro.url.pathname, Astro.site);
+---
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>{title}</title>
+<meta name="description" content={description} />
+<link rel="canonical" href={canonical} />
+<meta property="og:type" content={ogType} />
+<meta property="og:title" content={title} />
+<meta property="og:description" content={description} />
+<meta name="twitter:card" content="summary" />
+<meta name="twitter:title" content={title} />
+<meta name="twitter:description" content={description} />
+<link rel="alternate" type="application/rss+xml" title="Sathvik Rajampalli" href={new URL('rss.xml', Astro.site)} />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" />
+<script is:inline>
+  try { if (localStorage.getItem('sr-theme') === 'dark') document.documentElement.classList.add('dark'); } catch (e) {}
+  try { var a = ['#2e9e95','#3b82c4','#4caf6d','#d4638f','#e08a3c','#d1495b','#8b6fd1','#c9a227'][Number(localStorage.getItem('sr-accent')) || 0]; if (a) document.documentElement.style.setProperty('--accent', a); } catch (e) {}
+</script>
+<slot name="head" />
+</head>
+<body>
+{toc.length > 0 && (
+  <nav id="toc">
+    <div class="toc-head"><span class="ac">$</span> {tocLabel}</div>
+    {toc.map((i) => (
+      <a href={`#${i.id}`} data-toc={i.id} class={i.depth && i.depth > 2 ? 'd3' : ''}><span class="mk">·</span> {i.label}</a>
+    ))}
+  </nav>
+)}
+<div class="page">
+  <div class="card">
+    <div class="bar">
+      <div class="lights">
+        <span style="background:#ff5f57"></span>
+        <span style="background:#febc2e"></span>
+        <span style="background:#28c840"></span>
+      </div>
+      <span class="bar-title">{barTitle}</span>
+      <div class="bar-right">
+        <span class="stamp">{stamp}</span>
+        <button id="theme-toggle" type="button">* light</button>
+      </div>
+    </div>
+    <div class="screen">
+      <slot />
+    </div>
+  </div>
+</div>
+<script>
+  import '../scripts/terminal.js';
+</script>
+</body>
+</html>

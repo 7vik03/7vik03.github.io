@@ -1,0 +1,18 @@
+---
+export interface Props { title: string; id?: string; bodyClass?: string; }
+const { title, id, bodyClass = '' } = Astro.props;
+const dash = '─'.repeat(300);
+---
+<div class="sec" id={id}>
+  <div class="sec-top">
+    <span>┌─ </span><span class="sec-title">{title}</span><span>&nbsp;─</span><div class="dash">{dash}</div><span>┐</span>
+  </div>
+  <div class="sec-mid">
+    <div class="rail rail-l"></div>
+    <div class="rail rail-r"></div>
+    <div class:list={['sec-body', bodyClass]}><slot /></div>
+  </div>
+  <div class="sec-bot">
+    <span>└</span><div class="dash">{dash}</div><span>┘</span>
+  </div>
+</div>

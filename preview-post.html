@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Why sparse tensor kernels stall on Apple Silicon — Sathvik Rajampalli</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<style>
+/* ── Terminal shell — visual parity with the original single-file design ── */
+
+:root {
+  --paper: #f5f3ec;
+  --bar: #e8e5db;
+  --screen: #faf8f2;
+  --ink: #33312b;
+  --bright: #151412;
+  --dim: #bbb8ad;
+  --bartext: #8a877c;
+  --accent: #2e9e95;
+  --code-bg: #f2efe6;
+  --code-border: #ddd9cc;
+}
+:root.dark {
+  --paper: #0e0f12;
+  --bar: #15171c;
+  --screen: #15171c;
+  --ink: #c7cad1;
+  --bright: #ffffff;
+  --dim: #4b4e56;
+  --code-bg: #0f1116;
+  --code-border: #2b2f38;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; }
+a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; text-decoration-thickness: 1px; }
+a:hover { text-decoration-thickness: 2px; }
+::selection { background: var(--accent); color: var(--screen); }
+@keyframes blink { 0%,49% { opacity: 1; } 50%,100% { opacity: 0; } }
+
+.page {
+  min-height: 100vh;
+  padding: 46px 150px 90px 150px;
+  background: var(--paper);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+@media (max-width: 1100px) { .page { padding-left: 80px; padding-right: 80px; } }
+@media (max-width: 820px) { .page { padding-left: 18px; padding-right: 18px; } }
+
+.card {
+  max-width: 940px;
+  margin: 0 auto;
+  border: 1px solid rgba(0,0,0,.24);
+  border-radius: 9px;
+  overflow: hidden;
+  box-shadow: 0 18px 54px rgba(0,0,0,.35);
+}
+
+/* ── title bar ── */
+.bar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 9px;
+  padding: 11px 15px;
+  background: var(--bar);
+  border-bottom: 1px solid rgba(0,0,0,.24);
+}
+.lights { display: flex; align-items: center; gap: 9px; }
+.lights span { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+.bar-title { text-align: center; color: var(--bartext); font-size: 12.5px; letter-spacing: .3px; white-space: nowrap; }
+.bar-right { display: flex; align-items: center; justify-content: flex-end; gap: 14px; }
+.stamp { color: var(--bartext); font-size: 11.5px; letter-spacing: .2px; white-space: nowrap; }
+#theme-toggle {
+  cursor: pointer; color: var(--accent); font-size: 12px; font-weight: 500;
+  user-select: none; background: none; border: 0; padding: 0;
+  font-family: inherit;
+}
+
+/* ── screen ── */
+.screen { background: var(--screen); color: var(--ink); padding: 26px 30px 32px; font-size: 15px; }
+.prompt { font-size: 15px; margin-bottom: 16px; }
+.ac { color: var(--accent); }
+.dm { color: var(--dim); }
+.caret {
+  display: inline-block; width: 8px; height: 15px; background: var(--accent);
+  vertical-align: text-bottom; margin-left: 2px; animation: blink 1s step-end infinite;
+}
+
+/* ── neofetch ── */
+.fetch { display: flex; gap: 14px; align-items: stretch; flex-wrap: wrap; }
+#ascii {
+  margin: 0; color: var(--accent); font-size: 9px; line-height: 1.05;
+  font-family: inherit; white-space: pre; flex: none; align-self: stretch;
+  display: flex; align-items: center;
+}
+.fetch-info { flex: 1; min-width: 230px; overflow-wrap: normal; word-break: normal; }
+.name { color: var(--bright); font-weight: 700; font-size: 27px; letter-spacing: -0.5px; }
+.hr { color: var(--dim); overflow: hidden; white-space: nowrap; max-width: 340px; user-select: none; }
+.kv {
+  display: grid; grid-template-columns: auto 1fr;
+  column-gap: 10px; row-gap: 5px; margin-top: 8px; line-height: 1.5;
+}
+.kv .k { color: var(--accent); }
+.kv strong { color: var(--bright); font-weight: 700; }
+.palette-row { margin-top: 16px; display: flex; align-items: center; gap: 8px; }
+.palette-row .lab { color: var(--bartext); font-size: 12px; }
+.swatch {
+  width: 16px; height: 16px; border-radius: 50%; display: inline-block;
+  cursor: pointer; border: 2px solid transparent; padding: 0;
+}
+.swatch[aria-pressed="true"] { border-color: var(--bright); }
+
+/* ── ASCII section boxes ── */
+.sec { margin-top: 26px; user-select: none; }
+.sec:first-of-type { margin-top: 30px; }
+.sec-top, .sec-bot {
+  display: flex; align-items: center; white-space: nowrap;
+  overflow: hidden; transition: color .45s ease; color: var(--dim);
+}
+.sec-mid { position: relative; color: var(--dim); }
+.sec:hover .sec-top, .sec:hover .sec-bot, .sec:hover .sec-mid { color: var(--accent); }
+.dash { flex: 1; overflow: hidden; }
+.sec-title {
+  color: var(--accent); background: transparent; font-weight: 700;
+  font-size: 20px; padding: 1px 8px; transition: all .3s ease;
+}
+.sec:hover .sec-title { color: var(--screen); background: var(--accent); }
+/* self-sizing box side: a 1px currentColor line, so it reaches the bottom of
+   any post length (the old newline-joined '│' glyphs ran out on long pages) */
+.rail {
+  position: absolute; top: 0; bottom: 0; width: 1ch;
+  background-image: linear-gradient(to bottom, currentColor, currentColor);
+  background-size: 1px 100%; background-repeat: no-repeat; background-position: center;
+  transition: color .45s ease;
+}
+.rail-l { left: 0; }
+.rail-r { right: 0; }
+.sec-body { padding: 14px 28px; color: var(--ink); user-select: text; line-height: 1.75; font-size: 15px; }
+.sec-body.tight { padding: 12px 28px; }
+.sec-body.list { line-height: 1.9; }
+.sub { color: var(--bright); font-weight: 700; font-size: 18px; margin-top: 18px; }
+.rows { display: grid; grid-template-columns: auto 1fr; column-gap: 14px; row-gap: 8px; margin-top: 9px; }
+.rows .t { color: var(--accent); white-space: nowrap; }
+
+/* ── posts list ── */
+.postlist { display: grid; grid-template-columns: auto 1fr; column-gap: 14px; row-gap: 8px; margin-top: 10px; }
+.postlist .d { color: var(--accent); white-space: nowrap; }
+.postlist a { color: var(--ink); text-decoration: none; }
+.postlist a:hover { color: var(--accent); text-decoration: underline; }
+.feedline { margin-top: 16px; color: var(--dim); font-size: 13px; }
+
+/* ── table of contents ── */
+#toc {
+  position: fixed; top: 34px;
+  right: calc(50% + min(470px, (100vw - 300px) / 2) + 22px);
+  width: 124px; font-family: 'JetBrains Mono', ui-monospace, monospace;
+  z-index: 50; user-select: none;
+}
+#toc .toc-head { font-size: 12px; color: var(--ink); margin-bottom: 9px; white-space: nowrap; }
+#toc a {
+  display: block; cursor: pointer; padding: 4px 0; font-size: 12.5px;
+  line-height: 1.35; color: var(--ink); font-weight: 400;
+  transition: color .3s ease; text-decoration: none;
+}
+#toc a .mk { color: var(--accent); }
+#toc a.active { color: var(--bright); font-weight: 700; }
+#toc a.d3 { padding-left: 11px; }
+@media (max-width: 1180px) { #toc { display: none; } }
+
+/* ── post prose ── */
+.backlink {
+  display: inline-flex; align-items: center; gap: 7px; margin-bottom: 18px;
+  font-size: 13px; text-decoration: none; color: var(--accent);
+  border: 1px solid var(--dim); border-radius: 4px; padding: 4px 10px;
+  transition: border-color .25s ease, background .25s ease, color .25s ease;
+}
+.backlink:hover { border-color: var(--accent); background: var(--accent); color: var(--screen); text-decoration: none; }
+.backlink .hint { color: var(--dim); }
+.backlink:hover .hint { color: var(--screen); opacity: .8; }
+.post-meta { color: var(--dim); font-size: 13px; margin-top: 2px; }
+
+.prose { line-height: 1.8; font-size: 15px; }
+.prose > :first-child { margin-top: 0; }
+.prose p { margin: 0 0 16px; text-wrap: pretty; }
+.prose h2, .prose h3, .prose h4 { color: var(--bright); font-weight: 700; line-height: 1.35; scroll-margin-top: 40px; }
+.prose h2 { font-size: 19px; margin: 30px 0 12px; }
+.prose h3 { font-size: 16.5px; margin: 24px 0 10px; }
+.prose h4 { font-size: 15px; margin: 20px 0 8px; }
+.prose h2::before { content: "## "; color: var(--accent); font-weight: 400; }
+.prose h3::before { content: "### "; color: var(--accent); font-weight: 400; }
+.prose ul, .prose ol { margin: 0 0 16px; padding-left: 22px; }
+.prose li { margin: 5px 0; }
+.prose ul { list-style: none; padding-left: 0; }
+.prose ul > li { padding-left: 20px; position: relative; }
+.prose ul > li::before { content: "•"; position: absolute; left: 4px; color: var(--accent); }
+.prose blockquote {
+  margin: 0 0 16px; padding: 2px 0 2px 16px;
+  border-left: 2px solid var(--accent); color: var(--dim);
+}
+.prose hr { border: 0; border-top: 1px dashed var(--dim); margin: 26px 0; }
+.prose img, .prose video { display: block; max-width: 100%; height: auto; border: 1px solid var(--dim); border-radius: 4px; margin: 4px 0 8px; }
+.prose figcaption { color: var(--dim); font-size: 12.5px; margin-bottom: 16px; }
+.prose :not(pre) > code {
+  font-family: inherit; font-size: 13.5px; padding: 1.5px 5px;
+  background: var(--code-bg); border: 1px solid var(--code-border);
+  border-radius: 3px; color: var(--accent);
+}
+.prose pre {
+  position: relative; font-family: inherit; font-size: 13.5px; line-height: 1.8;
+  padding: 32px 18px 16px; margin: 0 0 20px;
+  background: var(--code-bg) !important;
+  border: 1px solid var(--code-border); border-radius: 6px;
+  overflow-x: auto; tab-size: 2;
+}
+.prose pre::before {
+  content: attr(data-language); position: absolute; top: 8px; left: 18px;
+  font-size: 10.5px; letter-spacing: .6px; text-transform: uppercase;
+  color: var(--bartext);
+}
+.prose pre code { font-family: inherit; background: none; }
+.prose table { border-collapse: collapse; width: 100%; margin: 0 0 18px; font-size: 14px; }
+.prose th, .prose td { border: 1px solid var(--dim); padding: 7px 11px; text-align: left; }
+.prose th { color: var(--bright); font-weight: 700; }
+.prose .footnotes { margin-top: 30px; padding-top: 14px; border-top: 1px dashed var(--dim); font-size: 13.5px; color: var(--dim); }
+.prose .footnotes h2 { font-size: 15px; }
+.prose .footnotes h2::before { content: "-- "; }
+.prose .katex { font-size: 1.02em; }
+.prose .katex-display { overflow-x: auto; overflow-y: hidden; padding: 2px 0 6px; }
+
+/* dual-theme Shiki: swap to the dark palette when .dark is on <html>.
+   Only the token colors — the block background stays --code-bg. */
+:root.dark .astro-code,
+:root.dark .astro-code span {
+  color: var(--shiki-dark) !important;
+}
+
+</style>
+</head>
+<body>
+<nav id="toc">
+  <div class="toc-head"><span class="ac">$</span> ls ~/outline</div>
+  <a href="#the-shape-of-the-problem" data-toc="the-shape-of-the-problem"><span class="mk">·</span> The shape of the problem</a>
+  <a href="#where-the-cycles-actually-go" data-toc="where-the-cycles-actually-go" class="d3"><span class="mk">·</span> Where the cycles actually go</a>
+  <a href="#a-rough-model" data-toc="a-rough-model"><span class="mk">·</span> A rough model</a>
+  <a href="#what-tiling-buys-you" data-toc="what-tiling-buys-you"><span class="mk">·</span> What tiling buys you</a>
+</nav>
+<div class="page">
+  <div class="card">
+    <div class="bar">
+      <div class="lights"><span style="background:#ff5f57"></span><span style="background:#febc2e"></span><span style="background:#28c840"></span></div>
+      <span class="bar-title">~/sathvik/posts — zsh — 96×30</span>
+      <div class="bar-right"><span class="stamp">Jul 14, 2026</span><button id="theme-toggle" type="button">* light</button></div>
+    </div>
+    <div class="screen">
+      <a class="backlink" href="#">← Back to home <span class="hint">(cd ~)</span></a>
+      <div class="prompt"><span class="ac">sathvik@columbia</span><span class="dm">:</span><span>~/posts</span><span class="dm">$</span> cat sparse-kernels-apple-silicon.md</div>
+      <div class="sec">
+        <div class="sec-top"><span>┌─ </span><span class="sec-title">Why sparse tensor kernels stall on Apple Silicon</span><span>&nbsp;─</span><div class="dash">────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</div><span>┐</span></div>
+        <div class="sec-mid">
+          <div class="rail rail-l"></div>
+          <div class="rail rail-r"></div>
+          <div class="sec-body">
+            <div class="post-meta">Jul 14, 2026</div>
+            <div class="prose" style="margin-top:18px">
+<p>Sparse kernels are usually described as memory-bound, which is true but not useful. "Memory-bound" is a budget, not a mechanism. The interesting question is <em>which</em> structure in the machine runs out first — and on the M-series cores it is almost never bandwidth.</p>
+
+<h2 id="the-shape-of-the-problem">The shape of the problem</h2>
+<p>A CSR SpMV inner loop does one indexed load per nonzero:</p>
+<pre class="astro-code" data-language="c"><code>for (int i = 0; i &lt; rows; i++) {
+  double acc = 0.0;
+  for (int k = rowptr[i]; k &lt; rowptr[i + 1]; k++)
+    acc += vals[k] * x[colidx[k]];   // &lt;-- the gather
+  y[i] = acc;
+}</code></pre>
+<p>The gather on <code>x</code> is the whole story. Everything else streams.</p>
+
+<h3 id="where-the-cycles-actually-go">Where the cycles actually go</h3>
+<table>
+<thead><tr><th>Structure</th><th style="text-align:right">Budget</th><th style="text-align:right">Typical occupancy</th><th>Stalls?</th></tr></thead>
+<tbody>
+<tr><td>L1D bandwidth</td><td style="text-align:right">~2/cy</td><td style="text-align:right">0.9</td><td>no</td></tr>
+<tr><td>Load queue entries</td><td style="text-align:right">128</td><td style="text-align:right">~120</td><td><strong>yes</strong></td></tr>
+<tr><td>L2 miss-status regs</td><td style="text-align:right">~—</td><td style="text-align:right">saturated</td><td><strong>yes</strong></td></tr>
+<tr><td>DRAM bandwidth</td><td style="text-align:right">100 GB/s</td><td style="text-align:right">38%</td><td>no</td></tr>
+</tbody></table>
+<p>The load queue fills long before the memory system does. Each unresolved gather occupies an entry for its full latency, so the reorder window drains and the core sits idle with bandwidth to spare.<sup><a href="#fn1">1</a></sup></p>
+
+<h2 id="a-rough-model">A rough model</h2>
+<p>If \(\mu\) is the average gather latency and \(Q\) the load-queue depth, sustained throughput is bounded by</p>
+<p>$$\text{nnz/cycle} \;\le\; \frac{Q}{\mu}$$</p>
+<p>which for \(Q = 128\) and \(\mu \approx 90\) cycles lands near 1.4 — close to what the hardware counters report, and nowhere near the bandwidth ceiling.</p>
+<blockquote><p>The fix is not to move fewer bytes. It is to have fewer <em>outstanding, independent</em> misses in flight at any one time — i.e. to make the gathers hit.</p></blockquote>
+
+<h2 id="what-tiling-buys-you">What tiling buys you</h2>
+<p>Blocking <code>x</code> into L1-resident panels turns most gathers into hits, which shortens \(\mu\) rather than shrinking traffic. On a 2.4 M-nonzero matrix that was a 2.1× win with byte counts essentially unchanged — the giveaway that the original bottleneck was never bandwidth.</p>
+<ul>
+<li>Panel width is set by L1D size, not by cache-line count.</li>
+<li>Reordering rows by nonzero pattern helps more than reordering columns.</li>
+<li>Prefetch hints help the streaming arrays and do nothing for the gather.</li>
+</ul>
+<p>Padding paragraph 1 — kept only to prove the box sides reach the bottom border on a long post. Sparse structure, tiling, and occupancy again, at length, until the page is several thousand pixels tall.</p>
+<p>Padding paragraph 2 — kept only to prove the box sides reach the bottom border on a long post. Sparse structure, tiling, and occupancy again, at length, until the page is several thousand pixels tall.</p>
+<p>Padding paragraph 3 — kept only to prove the box sides reach the bottom border on a long post. Sparse structure, tiling, and occupancy again, at length, until the page is several thousand pixels tall.</p>
+<p>Padding paragraph 4 — kept only to prove the box sides reach the bottom border on a long post. Sparse structure, tiling, and occupancy again, at length, until the page is several thousand pixels tall.</p>
+<p>Padding paragraph 5 — kept only to prove the box sides reach the bottom border on a long post. Sparse structure, tiling, and occupancy again, at length, until the page is several thousand pixels tall.</p>
+<p>Padding paragraph 6 — kept only to prove the box sides reach the bottom border on a long post. Sparse structure, tiling, and occupancy again, at length, until the page is several thousand pixels tall.</p>
+<p>Padding paragraph 7 — kept only to prove the box sides reach the bottom border on a long post. Sparse structure, tiling, and occupancy again, at length, until the page is several thousand pixels tall.</p>
+<p>Padding paragraph 8 — kept only to prove the box sides reach the bottom border on a long post. Sparse structure, tiling, and occupancy again, at length, until the page is several thousand pixels tall.</p>
+<p>Padding paragraph 9 — kept only to prove the box sides reach the bottom border on a long post. Sparse structure, tiling, and occupancy again, at length, until the page is several thousand pixels tall.</p>
+<p>Padding paragraph 10 — kept only to prove the box sides reach the bottom border on a long post. Sparse structure, tiling, and occupancy again, at length, until the page is several thousand pixels tall.</p>
+<p>Padding paragraph 11 — kept only to prove the box sides reach the bottom border on a long post. Sparse structure, tiling, and occupancy again, at length, until the page is several thousand pixels tall.</p>
+<p>Padding paragraph 12 — kept only to prove the box sides reach the bottom border on a long post. Sparse structure, tiling, and occupancy again, at length, until the page is several thousand pixels tall.</p>
+<section class="footnotes"><h2>Footnotes</h2><ol><li id="fn1">Measured with <code>pmc</code> counters on an M3 Pro, single performance core, 8-wide decode. The load-queue figure is inferred, not documented.</li></ol></section>
+</div>
+          </div>
+        </div>
+        <div class="sec-bot"><span>└</span><div class="dash">────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</div><span>┘</span></div>
+      </div>
+      <div style="margin-top:30px; font-size:15px"><span class="ac">sathvik@columbia</span><span class="dm">:</span><span>~/posts</span><span class="dm">$</span> <span class="caret"></span></div>
+    </div>
+  </div>
+</div>
+<script>
+// Terminal runtime: theme, accent palette, TOC scroll-spy, ASCII wave <-> logic-trace morph.
+// Ported 1:1 from the original single-file design so the motion is identical.
+
+const PALETTE = ['#2e9e95', '#3b82c4', '#4caf6d', '#d4638f', '#e08a3c', '#d1495b', '#8b6fd1', '#c9a227'];
+const root = document.documentElement;
+
+/* ── theme ── */
+const applyTheme = (dark) => {
+  root.classList.toggle('dark', dark);
+  const btn = document.getElementById('theme-toggle');
+  if (btn) btn.textContent = dark ? '* dark' : '* light';
+};
+try { applyTheme(localStorage.getItem('sr-theme') === 'dark'); } catch { applyTheme(false); }
+document.getElementById('theme-toggle')?.addEventListener('click', () => {
+  const dark = !root.classList.contains('dark');
+  applyTheme(dark);
+  try { localStorage.setItem('sr-theme', dark ? 'dark' : 'light'); } catch {}
+});
+
+/* ── accent ── */
+const swatches = [...document.querySelectorAll('.swatch')];
+const applyAccent = (i) => {
+  root.style.setProperty('--accent', PALETTE[i]);
+  swatches.forEach((s, n) => s.setAttribute('aria-pressed', String(n === i)));
+};
+let storedAccent = 0;
+try { storedAccent = Number(localStorage.getItem('sr-accent')) || 0; } catch {}
+if (swatches.length) applyAccent(storedAccent in PALETTE ? storedAccent : 0);
+swatches.forEach((s, i) => s.addEventListener('click', () => {
+  applyAccent(i);
+  try { localStorage.setItem('sr-accent', String(i)); } catch {}
+}));
+
+/* ── table of contents scroll-spy ── */
+const tocLinks = [...document.querySelectorAll('#toc a[data-toc]')];
+if (tocLinks.length) {
+  const spy = () => {
+    let current = tocLinks[0];
+    const threshold = window.innerHeight * 0.4;
+    for (const a of tocLinks) {
+      const el = document.getElementById(a.dataset.toc);
+      if (el && el.getBoundingClientRect().top < threshold) current = a;
+    }
+    const max = root.scrollHeight - window.innerHeight;
+    if (max > 0 && window.scrollY / max > 0.99) current = tocLinks[tocLinks.length - 1];
+    tocLinks.forEach((a) => {
+      const on = a === current;
+      a.classList.toggle('active', on);
+      a.querySelector('.mk').textContent = on ? '\u25b8' : '\u00b7';
+    });
+  };
+  window.addEventListener('scroll', spy, { passive: true });
+  spy();
+}
+
+/* ── ASCII animation ── */
+const asciiEl = document.getElementById('ascii');
+if (asciiEl) {
+  const rows = 26, cols = 32;
+  const traces = [
+    { row: 0.16, period: 5, phase: 0 },
+    { row: 0.5, period: 8, phase: 2 },
+    { row: 0.84, period: 3, phase: 5 },
+  ];
+  const blank = () => Array.from({ length: rows }, () => Array(cols).fill(' '));
+
+  const digitalFrame = (now) => {
+    const t = now * 0.006;
+    const out = blank();
+    for (const tr of traces) {
+      const base = rows * tr.row;
+      const hi = Math.round(base - 1.4), lo = Math.round(base + 1.4);
+      const bitAt = (c) => Math.floor((c + tr.phase + t * 4) / tr.period) % 2;
+      for (let c = 0; c < cols; c++) {
+        const bit = bitAt(c);
+        if (bit !== bitAt(c - 1)) { for (let r = hi; r <= lo; r++) out[r][c] = '|'; }
+        else out[bit ? hi : lo][c] = bit ? '\u203e' : '_';
+      }
+    }
+    return out;
+  };
+
+  const waveSurface = (c, t) =>
+    rows * 0.42 +
+    Math.sin(c * 0.34 + t * 2.1) * 2.6 +
+    Math.sin(c * 0.17 - t * 1.3) * 1.6 +
+    Math.sin(c * 0.6 + t * 3.4) * 0.6;
+
+  const waveFrame = (now) => {
+    const t = now * 0.0016;
+    const out = blank();
+    const crest = ['~', '-', '\u2248'];
+    for (let c = 0; c < cols; c++) {
+      const surface = waveSurface(c, t);
+      for (let r = 0; r < rows; r++) {
+        const depth = r - surface;
+        if (depth < -0.4) continue;
+        if (depth < 0.5) out[r][c] = crest[Math.abs(Math.floor(t * 3 - c * 0.4)) % crest.length];
+        else if (depth < 2.2) out[r][c] = '+';
+        else if (depth < 5) out[r][c] = '.';
+        else out[r][c] = r % 3 === 0 ? '.' : ' ';
+      }
+    }
+    return out;
+  };
+
+  const blendFrame = (p, now, fromMode, toMode) => {
+    const t = now * 0.0016, td = now * 0.006;
+    const out = blank();
+    const ease = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+    const fromIsDigital = fromMode !== 'waves';
+    for (let i = 0; i < traces.length; i++) {
+      const tr = traces[i];
+      const targetRow = rows * tr.row;
+      const targetHi = targetRow - 1.4, targetLo = targetRow + 1.4;
+      const bitAt = (c) => Math.floor((c + tr.phase + td * 4) / tr.period) % 2;
+      for (let c = 0; c < cols; c++) {
+        const waveRow = waveSurface(c, t);
+        const hiStart = fromMode === 'waves' ? waveRow : targetHi;
+        const hiEnd = toMode === 'waves' ? waveRow : targetHi;
+        const loStart = fromMode === 'waves' ? waveRow : targetLo;
+        const loEnd = toMode === 'waves' ? waveRow : targetLo;
+        const hi = Math.round(hiStart + (hiEnd - hiStart) * ease);
+        const lo = Math.round(loStart + (loEnd - loStart) * ease);
+        const digitalStyle = ease > c / cols ? !fromIsDigital : fromIsDigital;
+        if (digitalStyle) {
+          const bit = bitAt(c);
+          if (bit !== bitAt(c - 1)) {
+            const a = Math.min(hi, lo), b = Math.max(hi, lo);
+            for (let r = a; r <= b; r++) if (r >= 0 && r < rows) out[r][c] = '|';
+          } else {
+            const row = bit ? hi : lo;
+            if (row >= 0 && row < rows) out[row][c] = bit ? '\u203e' : '_';
+          }
+        } else {
+          const row = Math.round((hi + lo) / 2);
+          if (row >= 0 && row < rows) {
+            const crest = ['~', '-', '\u2248'];
+            out[row][c] = crest[Math.abs(Math.floor(t * 3 - c * 0.4)) % crest.length];
+          }
+          if (i === 1) {
+            let f = fromIsDigital ? ease : 1 - ease;
+            f = f * f * (3 - 2 * f);
+            for (let off = 1; row + off < rows; off++) {
+              const rr = row + off;
+              if (rr < 0) continue;
+              if (((c * 13 + off * 29) % 97) / 97 > f) continue;
+              out[rr][c] = off <= 2 ? '+' : off <= 4 ? '.' : rr % 3 === 0 ? '.' : ' ';
+            }
+          }
+        }
+      }
+    }
+    return out;
+  };
+
+  let mode = 'waves', lastSwitch = performance.now(), pending, fromMode, morphStart;
+  const MORPH = 2600, HOLD = 5000;
+  const loop = (now) => {
+    if (mode !== 'morphing' && now - lastSwitch > HOLD) {
+      pending = mode === 'waves' ? 'digital' : 'waves';
+      fromMode = mode;
+      morphStart = now;
+      mode = 'morphing';
+    }
+    let grid;
+    if (mode === 'morphing') {
+      const p = Math.min(1, (now - morphStart) / MORPH);
+      grid = blendFrame(p, now, fromMode, pending);
+      if (p >= 1) { mode = pending; lastSwitch = now; }
+    } else {
+      grid = mode === 'waves' ? waveFrame(now) : digitalFrame(now);
+    }
+    asciiEl.textContent = grid.map((r) => r.join('')).join('\n');
+    requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
+}
+
+</script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body,{delimiters:[{left:'$$',right:'$$',display:true},{left:'\\(',right:'\\)',display:false}]})"></script>
+</body>
+</html>
