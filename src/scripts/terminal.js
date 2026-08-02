@@ -35,14 +35,18 @@ swatches.forEach((s, i) => s.addEventListener('click', () => {
 const tocLinks = [...document.querySelectorAll('#toc a[data-toc]')];
 if (tocLinks.length) {
   const spy = () => {
+    // active = the last heading whose top has passed a band near the top of the
+    // viewport. No bottom-of-page override: that used to force the final entry
+    // active as soon as the page bottomed out, skipping the section before it.
+    const threshold = 120;
     let current = tocLinks[0];
-    const threshold = window.innerHeight * 0.4;
     for (const a of tocLinks) {
       const el = document.getElementById(a.dataset.toc);
-      if (el && el.getBoundingClientRect().top < threshold) current = a;
+      if (el && el.getBoundingClientRect().top <= threshold) current = a;
     }
+    // only at the true bottom (not 99%) does the final entry take over
     const max = root.scrollHeight - window.innerHeight;
-    if (max > 0 && window.scrollY / max > 0.99) current = tocLinks[tocLinks.length - 1];
+    if (max > 0 && max - window.scrollY <= 2) current = tocLinks[tocLinks.length - 1];
     tocLinks.forEach((a) => {
       const on = a === current;
       a.classList.toggle('active', on);
