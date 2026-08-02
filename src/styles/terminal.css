@@ -146,18 +146,19 @@ a:hover { text-decoration-thickness: 2px; }
 #toc {
   position: fixed; top: 34px;
   right: calc(50% + min(470px, (100vw - 300px) / 2) + 22px);
-  width: 124px; font-family: 'JetBrains Mono', ui-monospace, monospace;
+  width: 152px; font-family: 'JetBrains Mono', ui-monospace, monospace;
   z-index: 50; user-select: none;
 }
-#toc .toc-head { font-size: 12px; color: var(--ink); margin-bottom: 9px; white-space: nowrap; }
+#toc .toc-head { font-size: 12px; color: var(--ink); margin-bottom: 11px; white-space: nowrap; }
 #toc a {
-  display: block; cursor: pointer; padding: 4px 0; font-size: 12.5px;
-  line-height: 1.35; color: var(--ink); font-weight: 400;
-  transition: color .3s ease; text-decoration: none;
+  display: grid; grid-template-columns: 8px 1fr; column-gap: 7px;
+  align-items: start; cursor: pointer; padding: 4px 0; font-size: 12px;
+  line-height: 1.5; color: var(--ink); font-weight: 400;
+  transition: color .3s ease; text-decoration: none; overflow-wrap: break-word;
 }
-#toc a .mk { color: var(--accent); }
+#toc a .mk { color: var(--accent); text-align: left; }
 #toc a.active { color: var(--bright); font-weight: 700; }
-#toc a.d3 { padding-left: 11px; }
+#toc a.d3 { padding-left: 14px; }
 @media (max-width: 1180px) { #toc { display: none; } }
 
 /* ── post prose ── */

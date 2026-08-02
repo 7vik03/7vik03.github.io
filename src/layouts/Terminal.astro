@@ -51,7 +51,7 @@ const canonical = new URL(Astro.url.pathname, Astro.site);
   <nav id="toc">
     <div class="toc-head"><span class="ac">$</span> {tocLabel}</div>
     {toc.map((i) => (
-      <a href={`#${i.id}`} data-toc={i.id} class={i.depth && i.depth > 2 ? 'd3' : ''}><span class="mk">·</span> {i.label}</a>
+      <a href={`#${i.id}`} data-toc={i.id} class={i.depth && i.depth > 2 ? 'd3' : ''}><span class="mk">·</span><span class="lb">{i.label}</span></a>
     ))}
   </nav>
 )}
