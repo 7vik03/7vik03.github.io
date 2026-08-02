@@ -12,6 +12,8 @@ const { post } = Astro.props as { post: CollectionEntry<'posts'> };
 const { Content, headings } = await render(post);
 const toc = headings
   .filter((h) => h.depth === 2 || h.depth === 3)
+  // remark-gfm's auto-generated footnote heading is not part of the outline
+  .filter((h) => h.slug !== 'footnote-label' && h.text.trim().toLowerCase() !== 'footnotes')
   .map((h) => ({ id: h.slug, label: h.text, depth: h.depth }));
 const date = post.data.date.toLocaleDateString('en-US', {
   month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC',
